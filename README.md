@@ -67,8 +67,9 @@ uv run python -m benchmarks.breakdown_compare \
   results/jax091-breakdown.json > results/breakdown-summary.md
 ```
 
-The breakdown report benchmarks the internal call path behind `gp.log_probability` for each scenario and size:
+The breakdown report benchmarks the internal call path behind `gp.log_probability` for each scenario and size, lowering and compiling each stage once before collecting timed samples:
 
+- `build_gp`
 - `log_probability`
 - `_get_alpha`
 - `solver.solve_triangular`

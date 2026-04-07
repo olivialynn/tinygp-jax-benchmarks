@@ -37,6 +37,12 @@ def _block(value):
     return jax.block_until_ready(value)
 
 
+def _compile_callable(func, *args):
+    compiled_fn = jax.jit(func).lower(*args).compile()
+    _block(compiled_fn(*args))
+    return compiled_fn
+
+
 def _summarize_samples(
     scenario: str,
     size: int,
@@ -54,12 +60,11 @@ def _summarize_samples(
     }
 
 
-def _measure_callable(func, sample_count: int) -> list[float]:
-    _block(func())
+def _measure_callable(compiled_fn, *args, sample_count: int) -> list[float]:
     durations = []
     for _ in range(sample_count):
         started = time.perf_counter()
-        _block(func())
+        _block(compiled_fn(*args))
         durations.append(time.perf_counter() - started)
     return durations
 
@@ -75,23 +80,59 @@ def run_profile(profile_name: str) -> dict[str, object]:
             x, y = make_dataset(size)
             prepared_x, prepared_y = prepare_inputs(x, y)
 
-            gp = scenario.build_gp(prepared_x)
+            compiled_build_gp = _compile_callable(scenario.build_gp, prepared_x)
+            build_gp_samples = _measure_callable(
+                compiled_build_gp,
+                prepared_x,
+                sample_count=profile.samples,
+            )
+            results.append(
+                _summarize_samples(
+                    scenario=scenario_name,
+                    size=size,
+                    stage="build_gp",
+                    samples=build_gp_samples,
+                )
+            )
+
+            gp = _block(compiled_build_gp(prepared_x))
             centered_y = prepared_y - gp.loc
             alpha = _block(gp._get_alpha(prepared_y))
 
             stage_functions = {
-                "log_probability": lambda gp=gp, y=prepared_y: gp.log_probability(y),
-                "_get_alpha": lambda gp=gp, y=prepared_y: gp._get_alpha(y),
-                "solver.solve_triangular": (
-                    lambda gp=gp, y=centered_y: gp.solver.solve_triangular(y)
+                "log_probability": (
+                    lambda gp, y: gp.log_probability(y),
+                    (gp, prepared_y),
                 ),
-                "factor.solve": lambda gp=gp, y=centered_y: gp.solver.factor.solve(y),
-                "_compute_log_prob": lambda gp=gp, a=alpha: gp._compute_log_prob(a),
-                "solver.normalization": lambda gp=gp: gp.solver.normalization(),
+                "_get_alpha": (
+                    lambda gp, y: gp._get_alpha(y),
+                    (gp, prepared_y),
+                ),
+                "solver.solve_triangular": (
+                    lambda gp, y: gp.solver.solve_triangular(y),
+                    (gp, centered_y),
+                ),
+                "factor.solve": (
+                    lambda gp, y: gp.solver.factor.solve(y),
+                    (gp, centered_y),
+                ),
+                "_compute_log_prob": (
+                    lambda gp, a: gp._compute_log_prob(a),
+                    (gp, alpha),
+                ),
+                "solver.normalization": (
+                    lambda gp: gp.solver.normalization(),
+                    (gp,),
+                ),
             }
 
-            for stage_name, stage_fn in stage_functions.items():
-                samples = _measure_callable(stage_fn, profile.samples)
+            for stage_name, (stage_fn, stage_args) in stage_functions.items():
+                compiled_fn = _compile_callable(stage_fn, *stage_args)
+                samples = _measure_callable(
+                    compiled_fn,
+                    *stage_args,
+                    sample_count=profile.samples,
+                )
                 results.append(
                     _summarize_samples(
                         scenario=scenario_name,
