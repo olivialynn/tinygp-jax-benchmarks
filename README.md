@@ -105,4 +105,5 @@ Each row in `results` contains:
 ## GitHub Actions
 
 - `.github/workflows/benchmark.yml` runs the full two-version benchmark matrix manually via `workflow_dispatch`, uploads JSON artifacts, and appends a Markdown comparison table to the job summary.
+- `.github/workflows/breakdown-benchmark.yml` runs the stage-by-stage breakdown benchmark matrix manually via `workflow_dispatch`, uploads JSON artifacts, and appends a Markdown breakdown comparison table to the job summary.
 - `.github/workflows/pr-smoke.yml` runs a lightweight smoke profile on pull requests using `jax==0.9.1`.
